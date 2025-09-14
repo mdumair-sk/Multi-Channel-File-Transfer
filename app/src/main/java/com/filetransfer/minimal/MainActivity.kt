@@ -1,7 +1,7 @@
 // MainActivity.kt - Updated for optimized transfer engine
 package com.filetransfer.minimal
 
-import OptimizedTransferEngine
+import StreamingTransferEngine
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
@@ -33,7 +33,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var scrollView: ScrollView
 
     private var selectedFileUri: Uri? = null
-    private val transferEngine = OptimizedTransferEngine() // Using optimized engine
+    private val transferEngine = StreamingTransferEngine() // Using optimized engine
     private var isTransferring = false
 
     private val filePickerLauncher = registerForActivityResult(
