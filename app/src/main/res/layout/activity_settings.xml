@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- Connection Settings -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Connection Settings"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- USB Settings -->
+        <Switch
+            android:id="@+id/usbEnabledSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Enable USB Transfer"
+            android:layout_marginBottom="8dp"/>
+
+        <EditText
+            android:id="@+id/usbHostEdit"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="USB Host (127.0.0.1)"
+            android:inputType="textUri"
+            android:layout_marginBottom="8dp"/>
+
+        <EditText
+            android:id="@+id/usbPortEdit"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="USB Port (8888)"
+            android:inputType="number"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- WiFi Settings -->
+        <Switch
+            android:id="@+id/wifiEnabledSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Enable WiFi Transfer"
+            android:layout_marginBottom="8dp"/>
+
+        <EditText
+            android:id="@+id/wifiHostEdit"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="WiFi Host IP"
+            android:inputType="textUri"
+            android:layout_marginBottom="8dp"/>
+
+        <EditText
+            android:id="@+id/wifiPortEdit"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="WiFi Port (8889)"
+            android:inputType="number"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- Transfer Settings -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Transfer Settings"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- Dynamic chunk size switch -->
+        <Switch
+            android:id="@+id/dynamicChunkSizeSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Dynamic Chunk Size"
+            android:layout_marginBottom="8dp"/>
+
+        <!-- Chunk size setting -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Chunk Size"
+            android:layout_marginBottom="4dp"/>
+
+        <SeekBar
+            android:id="@+id/chunkSizeSeekBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="3"
+            android:progress="1"
+            android:layout_marginBottom="4dp"/>
+
+        <TextView
+            android:id="@+id/chunkSizeText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="2MB"
+            android:gravity="center"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- Max concurrent transfers -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Max Concurrent Transfers"
+            android:layout_marginBottom="4dp"/>
+
+        <SeekBar
+            android:id="@+id/maxConcurrentSeekBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="4"
+            android:progress="2"
+            android:layout_marginBottom="4dp"/>
+
+        <TextView
+            android:id="@+id/maxConcurrentText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="3 transfers"
+            android:gravity="center"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- Advanced Settings -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Advanced Settings"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="16dp"/>
+
+        <Switch
+            android:id="@+id/autoResumeSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Auto Resume Transfers"
+            android:layout_marginBottom="8dp"/>
+
+        <Switch
+            android:id="@+id/backgroundTransfersSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Background Transfers"
+            android:layout_marginBottom="8dp"/>
+
+        <Switch
+            android:id="@+id/notificationSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Transfer Notifications"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- Action Buttons -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="24dp">
+
+            <Button
+                android:id="@+id/saveButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Save Settings"
+                android:layout_marginEnd="8dp"/>
+
+            <Button
+                android:id="@+id/resetButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Reset to Defaults"
+                android:backgroundTint="#FF9800"
+                android:layout_marginEnd="8dp"/>
+
+            <Button
+                android:id="@+id/exportButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Export"
+                android:backgroundTint="#4CAF50"/>
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>
