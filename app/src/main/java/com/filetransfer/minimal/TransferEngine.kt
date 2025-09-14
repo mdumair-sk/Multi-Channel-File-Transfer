@@ -1,4 +1,3 @@
-// OptimizedTransferEngine.kt - BitTorrent-inspired with dynamic load balancing
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.sync.Mutex
@@ -19,16 +18,16 @@ import com.filetransfer.minimal.SessionStart
 import com.filetransfer.minimal.TransferConfig
 import com.filetransfer.minimal.TransferProgress
 import kotlin.math.max
+import kotlin.math.min
 
-class OptimizedTransferEngine {
+class StreamingTransferEngine {
     private val protocolHandler = ProtocolHandler()
-    private val TAG = "OptimizedTransferEngine"
+    private val TAG = "StreamingTransferEngine"
 
     // Optimization constants
-    private val OPTIMIZED_CHUNK_SIZE = 2 * 1024 * 1024 // 2MB chunks (32x larger)
-    private val PIPELINE_DEPTH = 20 // Send 20 chunks ahead without waiting
-    private val BATCH_ACK_SIZE = 10 // ACK every 10 chunks
-    private val CHANNEL_SPEED_WINDOW = 5 // Track last 5 chunks for speed calculation
+    private val OPTIMIZED_CHUNK_SIZE = 2 * 1024 * 1024 // 2MB chunks
+    private val PIPELINE_DEPTH = 10 // Reduced for memory efficiency
+    private val MAX_BUFFERED_CHUNKS = 5 // Maximum chunks to keep in memory
 
     suspend fun startTransfer(
         config: TransferConfig,
@@ -40,24 +39,20 @@ class OptimizedTransferEngine {
     ) = withContext(Dispatchers.IO) {
 
         val transferId = UUID.randomUUID().toString()
-        // Use optimized chunk size
         val chunkSize = OPTIMIZED_CHUNK_SIZE
         val totalChunks = ((fileSize + chunkSize - 1) / chunkSize).toInt()
         val transferredBytes = AtomicLong(0)
         val startTime = System.currentTimeMillis()
 
-        logCallback("🚀 OPTIMIZED TRANSFER: $fileName")
+        logCallback("🚀 STREAMING TRANSFER: $fileName")
         logCallback("📊 File: ${formatBytes(fileSize)}, Chunks: $totalChunks (${formatBytes(chunkSize.toLong())} each)")
+        logCallback("💾 Memory-efficient streaming mode enabled")
 
-        // Read file into memory
-        val fileBytes = inputStream.readBytes()
-        inputStream.close()
-
-        // Create connection pool with performance tracking
+        // Create connection pool
         val connectionPool = ConnectionPool()
 
         try {
-            // Establish connections
+            // Establish connections (same as before)
             if (config.usbEnabled) {
                 try {
                     val usbSocket = Socket(config.usbHost, config.usbPort)
@@ -88,47 +83,34 @@ class OptimizedTransferEngine {
                 throw Exception("No connections available")
             }
 
-            // Send session start to all connections
+            // Send session start
             val sessionStart = SessionStart(transferId, totalChunks, chunkSize, fileName)
             connectionPool.sendSessionStart(sessionStart, protocolHandler)
             logCallback("✅ Session started on ${connectionPool.size()} channel(s)")
 
-            // Start performance monitoring
-            val performanceMonitor = PerformanceMonitor(connectionPool, logCallback)
-            val monitorJob = launch { performanceMonitor.start() }
-
-            // Create chunk queue and missing chunks tracker
-            val chunkQueue = Channel<ChunkTask>(capacity = PIPELINE_DEPTH * 2)
-            val missingChunks = Collections.synchronizedSet(mutableSetOf<Int>())
+            // Start streaming transfer with bounded memory usage
             val completedChunks = AtomicInteger(0)
+            val chunkProducerChannel = Channel<ChunkTask>(capacity = MAX_BUFFERED_CHUNKS)
 
-            // Populate chunk queue
-            launch {
-                for (chunkId in 0 until totalChunks) {
-                    val offset = chunkId * chunkSize
-                    val actualChunkSize = minOf(chunkSize, fileBytes.size - offset)
-                    val chunkData = fileBytes.sliceArray(offset until offset + actualChunkSize)
-                    val checksum = computeSHA256(chunkData)
-
-                    val task = ChunkTask(
-                        chunkId = chunkId,
-                        data = chunkData,
-                        checksum = checksum,
-                        transferId = transferId
-                    )
-                    chunkQueue.send(task)
-                }
-                chunkQueue.close()
+            // Chunk producer - reads file in streaming fashion
+            val producerJob = launch {
+                streamingChunkProducer(
+                    inputStream = inputStream,
+                    transferId = transferId,
+                    totalChunks = totalChunks,
+                    chunkSize = chunkSize,
+                    chunkChannel = chunkProducerChannel,
+                    logCallback = logCallback
+                )
             }
 
             // Start chunk senders (one per connection)
             val senderJobs = connectionPool.getConnections().map { conn ->
                 launch {
-                    chunkSender(
+                    streamingChunkSender(
                         connection = conn,
-                        chunkQueue = chunkQueue,
+                        chunkChannel = chunkProducerChannel,
                         protocolHandler = protocolHandler,
-                        missingChunks = missingChunks,
                         completedChunks = completedChunks,
                         totalChunks = totalChunks,
                         transferredBytes = transferredBytes,
@@ -140,39 +122,102 @@ class OptimizedTransferEngine {
                 }
             }
 
-            // Wait for all chunks to be sent
+            // Wait for producer and all senders
+            producerJob.join()
             senderJobs.joinAll()
-            monitorJob.cancel()
-
-            // Handle missing chunks (recovery phase)
-            if (missingChunks.isNotEmpty()) {
-                logCallback("🔄 Recovery phase: ${missingChunks.size} missing chunks")
-                // TODO: Implement missing chunk recovery
-            }
 
             // Send transfer complete
             connectionPool.sendTransferComplete(transferId, totalChunks, fileSize, protocolHandler)
 
             val duration = System.currentTimeMillis() - startTime
-            val avgSpeedMbps = (fileSize * 8.0) / (duration * 1000.0) // Mbps
-            logCallback("🎉 TRANSFER COMPLETE!")
+            val avgSpeedMbps = (fileSize * 8.0) / (duration * 1000.0)
+            logCallback("🎉 STREAMING TRANSFER COMPLETE!")
             logCallback("⚡ Speed: ${String.format("%.1f", avgSpeedMbps)} Mbps (${formatBytes(fileSize * 1000 / duration)}/s)")
             logCallback("⏱️ Duration: ${duration}ms")
+            logCallback("💾 Peak memory usage: ~${formatBytes((MAX_BUFFERED_CHUNKS * chunkSize).toLong())}")
 
         } catch (e: Exception) {
             logCallback("💥 Transfer failed: ${e.message}")
             Log.e(TAG, "Transfer failed", e)
             throw e
         } finally {
+            inputStream.close()
             connectionPool.closeAll()
         }
     }
 
-    private suspend fun chunkSender(
+    private suspend fun streamingChunkProducer(
+        inputStream: InputStream,
+        transferId: String,
+        totalChunks: Int,
+        chunkSize: Int,
+        chunkChannel: Channel<ChunkTask>,
+        logCallback: (String) -> Unit
+    ) {
+        try {
+            val buffer = ByteArray(chunkSize)
+            var chunkId = 0
+
+            while (chunkId < totalChunks) {
+                // Calculate actual chunk size for last chunk
+                val remainingBytes = if (chunkId == totalChunks - 1) {
+                    // Last chunk might be smaller
+                    val totalSize = totalChunks.toLong() * chunkSize
+                    val actualFileSize = (totalChunks - 1).toLong() * chunkSize
+                    (totalSize - actualFileSize).toInt()
+                } else {
+                    chunkSize
+                }
+
+                // Read chunk data
+                var totalRead = 0
+                while (totalRead < remainingBytes) {
+                    val bytesRead = inputStream.read(buffer, totalRead, remainingBytes - totalRead)
+                    if (bytesRead == -1) break
+                    totalRead += bytesRead
+                }
+
+                if (totalRead == 0) break
+
+                // Create chunk data array with actual size
+                val chunkData = ByteArray(totalRead)
+                System.arraycopy(buffer, 0, chunkData, 0, totalRead)
+
+                // Compute checksum
+                val checksum = computeSHA256(chunkData)
+
+                val task = ChunkTask(
+                    chunkId = chunkId,
+                    data = chunkData,
+                    checksum = checksum,
+                    transferId = transferId
+                )
+
+                // Send chunk to channel (this will block if buffer is full)
+                chunkChannel.send(task)
+
+                if (chunkId % 100 == 0) {
+                    logCallback("📖 Read chunk $chunkId/$totalChunks from stream")
+                }
+
+                chunkId++
+            }
+
+            chunkChannel.close()
+            logCallback("✅ File streaming complete: $chunkId chunks produced")
+
+        } catch (e: Exception) {
+            logCallback("❌ Streaming producer error: ${e.message}")
+            Log.e(TAG, "Streaming producer error", e)
+            chunkChannel.close(e)
+            throw e
+        }
+    }
+
+    private suspend fun streamingChunkSender(
         connection: OptimizedConnection,
-        chunkQueue: Channel<ChunkTask>,
+        chunkChannel: Channel<ChunkTask>,
         protocolHandler: ProtocolHandler,
-        missingChunks: MutableSet<Int>,
         completedChunks: AtomicInteger,
         totalChunks: Int,
         transferredBytes: AtomicLong,
@@ -184,62 +229,87 @@ class OptimizedTransferEngine {
         val inFlightChunks = mutableMapOf<Int, Long>() // chunkId -> sendTime
 
         try {
-            // Pipeline chunks - keep PIPELINE_DEPTH chunks in flight
-            while (true) {
-                // Send new chunks if we have capacity
-                while (inFlightChunks.size < PIPELINE_DEPTH) {
-                    val task = chunkQueue.tryReceive().getOrNull() ?: break
+            // Process chunks as they become available
+            for (task in chunkChannel) {
+                try {
+                    // Send chunk
+                    connection.sendChunk(task, protocolHandler)
+                    inFlightChunks[task.chunkId] = System.currentTimeMillis()
 
-                    try {
-                        connection.sendChunk(task, protocolHandler)
-                        inFlightChunks[task.chunkId] = System.currentTimeMillis()
-                        Log.d(TAG, "${connection.name}: Sent chunk ${task.chunkId} (${inFlightChunks.size} in flight)")
-                    } catch (e: Exception) {
-                        logCallback("${connection.name}: Error sending chunk ${task.chunkId}: ${e.message}")
-                        missingChunks.add(task.chunkId)
-                        break
+                    Log.d(TAG, "${connection.name}: Sent chunk ${task.chunkId} (${inFlightChunks.size} in flight)")
+
+                    // Check for responses (non-blocking)
+                    val responses = connection.readPendingResponses()
+                    for (response in responses) {
+                        val (msgType, data) = response
+                        if (msgType == "chunk_ack") {
+                            val chunkId = data.optInt("chunk_id", -1)
+                            val sendTime = inFlightChunks.remove(chunkId)
+
+                            if (sendTime != null) {
+                                val rtt = System.currentTimeMillis() - sendTime
+                                connection.updatePerformance(rtt, OPTIMIZED_CHUNK_SIZE)
+
+                                val completed = completedChunks.incrementAndGet()
+                                transferredBytes.addAndGet(OPTIMIZED_CHUNK_SIZE.toLong())
+
+                                // Update progress
+                                val currentTime = System.currentTimeMillis()
+                                val elapsedSeconds = (currentTime - startTime) / 1000.0
+                                val speedBps = if (elapsedSeconds > 0) (transferredBytes.get() / elapsedSeconds).toLong() else 0
+                                val percentComplete = ((completed * 100) / totalChunks)
+
+                                progressCallback(TransferProgress(transferredBytes.get(), fileSize, percentComplete, speedBps))
+
+                                if (completed % 50 == 0) {
+                                    val speedMbps = (speedBps * 8.0) / (1024 * 1024)
+                                    logCallback("📈 Progress: $completed/$totalChunks (${String.format("%.1f", speedMbps)} Mbps)")
+                                }
+                            }
+                        }
                     }
-                }
 
-                // Check for responses (non-blocking)
+                    // Throttle if too many chunks in flight
+                    while (inFlightChunks.size >= PIPELINE_DEPTH) {
+                        delay(1)
+                        // Process more responses
+                        val moreResponses = connection.readPendingResponses()
+                        for (response in moreResponses) {
+                            val (msgType, data) = response
+                            if (msgType == "chunk_ack") {
+                                val chunkId = data.optInt("chunk_id", -1)
+                                inFlightChunks.remove(chunkId)?.let { sendTime ->
+                                    val rtt = System.currentTimeMillis() - sendTime
+                                    connection.updatePerformance(rtt, OPTIMIZED_CHUNK_SIZE)
+                                    completedChunks.incrementAndGet()
+                                    transferredBytes.addAndGet(OPTIMIZED_CHUNK_SIZE.toLong())
+                                }
+                            }
+                        }
+                    }
+
+                } catch (e: Exception) {
+                    logCallback("${connection.name}: Error sending chunk ${task.chunkId}: ${e.message}")
+                    // Could implement retry logic here
+                    break
+                }
+            }
+
+            // Wait for remaining responses
+            while (inFlightChunks.isNotEmpty()) {
+                delay(10)
                 val responses = connection.readPendingResponses()
                 for (response in responses) {
                     val (msgType, data) = response
                     if (msgType == "chunk_ack") {
                         val chunkId = data.optInt("chunk_id", -1)
-                        val sendTime = inFlightChunks.remove(chunkId)
-
-                        if (sendTime != null) {
+                        inFlightChunks.remove(chunkId)?.let { sendTime ->
                             val rtt = System.currentTimeMillis() - sendTime
                             connection.updatePerformance(rtt, OPTIMIZED_CHUNK_SIZE)
-
-                            val completed = completedChunks.incrementAndGet()
+                            completedChunks.incrementAndGet()
                             transferredBytes.addAndGet(OPTIMIZED_CHUNK_SIZE.toLong())
-
-                            // Update progress
-                            val currentTime = System.currentTimeMillis()
-                            val elapsedSeconds = (currentTime - startTime) / 1000.0
-                            val speedBps = if (elapsedSeconds > 0) (transferredBytes.get() / elapsedSeconds).toLong() else 0
-                            val percentComplete = ((completed * 100) / totalChunks)
-
-                            progressCallback(TransferProgress(transferredBytes.get(), fileSize, percentComplete, speedBps))
-
-                            if (completed % 50 == 0) { // Log every 50 chunks
-                                val speedMbps = (speedBps * 8.0) / (1024 * 1024)
-                                logCallback("📈 Progress: $completed/$totalChunks (${String.format("%.1f", speedMbps)} Mbps)")
-                            }
                         }
                     }
-                }
-
-                // Break if no more chunks and nothing in flight
-                if (chunkQueue.isClosedForReceive && inFlightChunks.isEmpty()) {
-                    break
-                }
-
-                // Small delay to prevent busy waiting
-                if (inFlightChunks.size >= PIPELINE_DEPTH) {
-                    delay(1)
                 }
             }
 
@@ -267,7 +337,7 @@ class OptimizedTransferEngine {
     }
 }
 
-// Optimized connection with performance tracking
+
 class OptimizedConnection(
     val socket: Socket,
     val name: String,
@@ -278,16 +348,14 @@ class OptimizedConnection(
     private val performanceHistory = mutableListOf<PerformanceData>()
     private val performanceMutex = Mutex()
 
-    // Performance metrics
     private var avgRtt: Long = 0
-    private var avgThroughput: Long = 0 // bytes/second
-    private var weight: Double = 1.0 // Dynamic weight for load balancing
+    private var avgThroughput: Long = 0
+    private var weight: Double = 1.0
 
     suspend fun sendChunk(task: ChunkTask, protocolHandler: ProtocolHandler) {
         val chunkHeader = ChunkHeader(task.transferId, task.chunkId, task.data.size, task.checksum)
         val headerMessage = protocolHandler.serializeMessage("chunk_header", chunkHeader)
 
-        // Send header + data atomically
         synchronized(outputStream) {
             outputStream.write(headerMessage)
             outputStream.write(task.data)
@@ -314,8 +382,7 @@ class OptimizedConnection(
 
     private fun readServerResponse(): Pair<String, JSONObject>? {
         return try {
-            // Same as before, but with shorter timeout for non-blocking behavior
-            socket.soTimeout = 100 // 100ms timeout
+            socket.soTimeout = 100
 
             val header7 = ByteArray(7)
             inputStream.readFully(header7)
@@ -345,7 +412,7 @@ class OptimizedConnection(
         } catch (e: Exception) {
             null
         } finally {
-            socket.soTimeout = 30000 // Reset to original timeout
+            socket.soTimeout = 30000
         }
     }
 
@@ -355,17 +422,13 @@ class OptimizedConnection(
 
             performanceHistory.add(PerformanceData(rtt, throughput, System.currentTimeMillis()))
 
-            // Keep only recent history
             if (performanceHistory.size > 10) {
                 performanceHistory.removeAt(0)
             }
 
-            // Calculate averages
             avgRtt = performanceHistory.map { it.rtt }.average().toLong()
             avgThroughput = performanceHistory.map { it.throughput }.average().toLong()
-
-            // Calculate dynamic weight (higher throughput = higher weight)
-            weight = max(0.1, avgThroughput.toDouble() / (1024 * 1024)) // Weight based on MB/s
+            weight = max(0.1, avgThroughput.toDouble() / (1024 * 1024))
         }
     }
 
@@ -390,7 +453,6 @@ class ConnectionPool {
     }
 
     fun getConnections(): List<OptimizedConnection> = connections.toList()
-
     fun isEmpty(): Boolean = connections.isEmpty()
     fun size(): Int = connections.size
 
@@ -402,7 +464,6 @@ class ConnectionPool {
                 conn.socket.getOutputStream().write(sessionMessage)
                 conn.socket.getOutputStream().flush()
 
-                // Wait for session_ack (blocking for session setup)
                 conn.socket.soTimeout = 10000
                 val response = conn.readPendingResponses().firstOrNull()
                 if (response != null && response.first == "session_ack") {
@@ -438,34 +499,6 @@ class ConnectionPool {
     fun closeAll() {
         connections.forEach { it.close() }
         connections.clear()
-    }
-}
-
-class PerformanceMonitor(
-    private val connectionPool: ConnectionPool,
-    private val logCallback: (String) -> Unit
-) {
-    suspend fun start() {
-        while (true) {
-            delay(5000) // Report every 5 seconds
-
-            val connections = connectionPool.getConnections()
-            if (connections.isNotEmpty()) {
-                val report = StringBuilder("📊 PERFORMANCE REPORT:\n")
-
-                connections.forEach { conn ->
-                    val throughputMbps = (conn.getAvgThroughput() * 8.0) / (1024 * 1024)
-                    val weight = conn.getWeight()
-                    report.append("   ${conn.name}: ${String.format("%.1f", throughputMbps)} Mbps (weight: ${String.format("%.2f", weight)})\n")
-                }
-
-                val totalThroughput = connections.sumOf { it.getAvgThroughput() }
-                val totalMbps = (totalThroughput * 8.0) / (1024 * 1024)
-                report.append("   TOTAL: ${String.format("%.1f", totalMbps)} Mbps")
-
-                logCallback(report.toString())
-            }
-        }
     }
 }
 
