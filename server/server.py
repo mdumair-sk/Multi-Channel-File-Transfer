@@ -338,7 +338,7 @@ class TransferSession:
             self.file_handle.flush()
 
         logger.info(
-            f"📦 Created and pre-allocated {expected_size:,} bytes for {self.filename}"
+            f"📂 Created and pre-allocated {expected_size:,} bytes for {self.filename}"
         )
         logger.info(f"📂 File path: {self.file_path}")
 
@@ -361,7 +361,7 @@ class TransferSession:
         self.received_chunks.add(chunk_id)
 
         logger.debug(
-            f"✏️ Wrote chunk {chunk_id} at position {file_position} ({bytes_written} bytes)"
+            f"📝 Wrote chunk {chunk_id} at position {file_position} ({bytes_written} bytes)"
         )
         return bytes_written
 
@@ -383,7 +383,7 @@ class TransferSession:
 
         if missing_chunks:
             logger.warning(
-                f"🔴 Transfer {self.transfer_id} has {len(missing_chunks)} missing chunks"
+                f"⚠️ Transfer {self.transfer_id} has {len(missing_chunks)} missing chunks"
             )
             logger.warning(
                 f"Missing chunks: {sorted(list(missing_chunks))[:10]}{'...' if len(missing_chunks) > 10 else ''}"
@@ -402,7 +402,7 @@ class TransferSession:
 
                 zeros_to_write = self.chunk_size
                 self.file_handle.write(b"\x00" * zeros_to_write)
-                logger.info(f"💾 Filled missing chunk {chunk_id} with zeros")
+                logger.info(f"🔧 Filled missing chunk {chunk_id} with zeros")
 
                 # Close the file handle
                 self.file_handle.close()
@@ -410,7 +410,7 @@ class TransferSession:
 
                 # Get final file size
                 actual_size = os.path.getsize(self.file_path)
-                logger.info(f"💾 File {self.filename} finalized: {actual_size} bytes")
+                logger.info(f"📊 File {self.filename} finalized: {actual_size} bytes")
 
     def cleanup(self):
         """Clean up resources"""
@@ -527,7 +527,7 @@ class DualChannelServer:
                     logger.error(f"❌ {channel_type} error while parsing header: {e}")
                     break
 
-                logger.info(f"✅ {channel_type} received {msg_type}")
+                logger.info(f"📨 {channel_type} received {msg_type}")
 
                 # --- Handle Messages ---
                 if msg_type == "session_start":
@@ -613,7 +613,7 @@ class DualChannelServer:
                             file_size = os.path.getsize(session.file_path)
                             chunks_received = len(session.received_chunks)
 
-                            logger.info(f"✅ Transfer {tid} complete!")
+                            logger.info(f"🎉 Transfer {tid} complete!")
                             logger.info(f"   File: {session.file_path}")
                             logger.info(f"   Size: {file_size:,} bytes")
                             logger.info(f"   Duration: {duration} ms")
@@ -665,7 +665,7 @@ class DualChannelServer:
                 await writer.wait_closed()
             except Exception:
                 pass
-            logger.info(f"🔌 {channel_type} [{connection_id}] connection closed")
+            logger.info(f"🔒 {channel_type} [{connection_id}] connection closed")
 
 
 
@@ -710,9 +710,9 @@ class DualChannelServer:
                     lambda r, w: self.handle_client(r, w, "WiFi"), "0.0.0.0", self.wifi_port
                 )
 
-                logger.info(f"🌍 USB Server: 127.0.0.1:{self.usb_port}")
-                logger.info(f"📶 WiFi Server: 0.0.0.0:{self.wifi_port}")
-                logger.info(f"🧹 Output directory: {os.path.abspath(self.output_dir)}")
+                logger.info(f"🔌 USB Server: 127.0.0.1:{self.usb_port}")
+                logger.info(f"📡 WiFi Server: 0.0.0.0:{self.wifi_port}")
+                logger.info(f"📁 Output directory: {os.path.abspath(self.output_dir)}")
                 logger.info("🚀 Server ready for connections")
 
                 async with usb_server, wifi_server:
